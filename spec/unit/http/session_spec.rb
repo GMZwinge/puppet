@@ -155,7 +155,6 @@ describe Puppet::HTTP::Session do
       }.to raise_error(Puppet::Error, "Could not select a functional puppet master from server_list: 'foo.example.com,bar.example.com'")
     end
 
-
     it "raises when there are no more routes" do
       allow_any_instance_of(Net::HTTP).to receive(:start).and_raise(Errno::EHOSTUNREACH)
       session = client.create_session
@@ -163,6 +162,50 @@ describe Puppet::HTTP::Session do
       expect {
         session.route_to(:ca)
       }.to raise_error(Puppet::HTTP::RouteError, 'No more routes to ca')
+    end
+
+    Puppet::HTTP::Service::SERVICE_NAMES.each do |name|
+      it "resolves #{name} using server_list" do
+        Puppet[:server_list] = 'apple.example.com'
+        req = stub_request(:get, "https://apple.example.com:8140/status/v1/simple/master").to_return(status: 200)
+
+        session.route_to(name)
+
+        expect(req).to have_been_requested
+      end
+    end
+
+    it 'does not use server_list to resolve the ca service when ca_server is explicitly set' do
+      Puppet[:ca_server] = 'banana.example.com'
+
+      expect(session.route_to(:ca).url.to_s).to eq("https://banana.example.com:8140/puppet-ca/v1")
+    end
+
+    it 'does not use server_list to resolve the report service when the report_server is explicitly set' do
+      Puppet[:report_server] = 'cherry.example.com'
+
+      expect(session.route_to(:report).url.to_s).to eq("https://cherry.example.com:8140/puppet/v3")
+    end
+
+    it 'resolves once for all services in a session' do
+      Puppet[:server_list] = 'apple.example.com'
+      req = stub_request(:get, "https://apple.example.com:8140/status/v1/simple/master").to_return(status: 200)
+
+      Puppet::HTTP::Service::SERVICE_NAMES.each do |name|
+        session.route_to(name)
+      end
+
+      expect(req).to have_been_requested
+    end
+
+    it 'resolves server_list for each new session' do
+      Puppet[:server_list] = 'apple.example.com'
+      req = stub_request(:get, "https://apple.example.com:8140/status/v1/simple/master").to_return(status: 200)
+
+      client.create_session.route_to(:puppet)
+      client.create_session.route_to(:puppet)
+
+      expect(req).to have_been_requested.twice
     end
   end
 

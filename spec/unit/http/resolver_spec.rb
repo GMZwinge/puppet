@@ -22,10 +22,11 @@ describe Puppet::HTTP::Resolver do
   end
 
   context 'when resolving using server_list' do
+    let(:subject) { Puppet::HTTP::Resolver::ServerList.new(client, server_list_setting: Puppet.settings.setting(:server_list), default_port: 8142, services: Puppet::HTTP::Service::SERVICE_NAMES) }
+
     before :each do
       Puppet[:server_list] = 'ca.example.com:8141,apple.example.com'
     end
-    let(:subject) { Puppet::HTTP::Resolver::ServerList.new(client, server_list_setting: Puppet.settings.setting(:server_list), default_port: 8142, services: [:puppet, :ca]) }
 
     it 'returns a service based on the current server_list setting' do
       stub_request(:get, "https://ca.example.com:8141/status/v1/simple/master").to_return(status: 200)
@@ -68,6 +69,23 @@ describe Puppet::HTTP::Resolver do
       service = subject.resolve(session, :ca)
       expect(service).to be_an_instance_of(Puppet::HTTP::Service::Ca)
       expect(service.url.to_s).to eq("https://apple.example.com:8142/puppet-ca/v1")
+    end
+
+    it 'resolves once per session' do
+      failed = stub_request(:get, "https://ca.example.com:8141/status/v1/simple/master").to_return(status: 503)
+      passed = stub_request(:get, "https://apple.example.com:8142/status/v1/simple/master").to_return(status: 200)
+
+      service = subject.resolve(session, :puppet)
+      expect(service.url.to_s).to eq("https://apple.example.com:8142/puppet/v3")
+
+      service = subject.resolve(session, :fileserver)
+      expect(service.url.to_s).to eq("https://apple.example.com:8142/puppet/v3")
+
+      service = subject.resolve(session, :report)
+      expect(service.url.to_s).to eq("https://apple.example.com:8142/puppet/v3")
+
+      expect(failed).to have_been_requested
+      expect(passed).to have_been_requested
     end
   end
 
